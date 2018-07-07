@@ -2,23 +2,29 @@
 #include "BrowserHandler.h"
 #include "WindowSelector.h"
 #include "Convertions.h"
+#include "Util.h"
 
 // Global variables.
 HWINEVENTHOOK LHook = 0;
 BOOL printAllEvents = FALSE;
+HANDLE hStop;
+HANDLE hThread;
 
 // Prints browser data on window selection.
 void GetWindowData() {
 	DWORD threadId;
-	HANDLE hStop = CreateEvent(NULL, TRUE, FALSE, NULL);
-	HANDLE hThread = CreateThread(NULL, 0, Thread, (LPVOID)hStop, 0, &threadId);
+	hStop = CreateEvent(NULL, TRUE, FALSE, NULL);
+	hThread = CreateThread(NULL, 0, Thread, (LPVOID)hStop, 0, &threadId);
+}
 
-	Sleep(5000);
-
-	SetEvent(hStop);
-	WaitForSingleObject(hThread, 5000);
-	CloseHandle(hThread);
-	CloseHandle(hStop);
+// Stop the theads and close handles.
+void Release() {
+	if (hStop && hThread) {
+		SetEvent(hStop);
+		WaitForSingleObject(hThread, 5000);
+		CloseHandle(hThread);
+		CloseHandle(hStop);
+	}
 }
 
 /* Function to handle events*/
@@ -41,6 +47,12 @@ void CALLBACK WinEventProc(
 		wchar_t className[80];
 		GetClassName(hWnd, className, 80);
 
+		// If bstrName is null, return.
+		if (bstrName == NULL) {
+			pAcc->Release();
+			return;
+		}
+
 		// If window is chrome.
 		if (wcscmp(className, getWChar(CHROME)) == 0 && (printAllEvents || wcscmp(bstrName, getWChar(CHROME_ADDRESS_BAR))) == 0) {
 			WriteWindowInfo(hWnd, L"Chrome", bstrValue);
@@ -49,10 +61,10 @@ void CALLBACK WinEventProc(
 			WriteWindowInfo(hWnd, L"Firefox", bstrValue);
 		}
 		else if (wcscmp(className, getWChar(IE)) == 0) {
-			WriteWindowInfo(hWnd, L"IE", bstrValue);
+			HandleIE(hWnd);
 		}
-		else {
-			WriteWindowInfo(hWnd, bstrName, bstrValue);
+		else if (wcscmp(className, getWChar(ADOBE_READER)) == 0) {
+			WriteWindowInfo(hWnd, L"Adobe Reader", NULL);
 		}
 		pAcc->Release();
 	}
@@ -64,6 +76,7 @@ void Hook() {
 	CoInitialize(NULL);
 	LHook = SetWinEventHook(EVENT_OBJECT_FOCUS, EVENT_OBJECT_VALUECHANGE,
 		0, WinEventProc, 0, 0, WINEVENT_SKIPOWNPROCESS);
+
 }
 
 void UnHook() {
@@ -71,6 +84,7 @@ void UnHook() {
 
 	UnhookWinEvent(LHook);
 	CoUninitialize();
+	LHook = 0;
 }
 
 DWORD WINAPI Thread(LPVOID pVoid) {
@@ -86,7 +100,7 @@ DWORD WINAPI Thread(LPVOID pVoid) {
 		switch (waitRes) {
 		case WAIT_ABANDONED:
 		case WAIT_FAILED:
-			std::cout << "Something went wrong with the event object." << std::endl;
+			OutputDebugString(L"Something went wrong with the event object.");
 			break;
 		case WAIT_OBJECT_0:
 			leave = TRUE;
@@ -105,6 +119,7 @@ DWORD WINAPI Thread(LPVOID pVoid) {
 	return 0;
 }
 
+// Deprecated.
 BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam) {
 	wchar_t* className = new wchar_t[MAX_LOADSTRING];
 	wchar_t* title = new wchar_t[MAX_LOADSTRING];
@@ -155,7 +170,12 @@ BOOL WriteWindowInfo(HWND hWndWindow, const wchar_t* app, wchar_t* value) {
 		// Write to file in appnd mode.
 		FILE* fp;
 		_wfopen_s(&fp, getWChar(LOG_FILE), L"a");
-		fprintf(fp, "Window: %ls, Title: %ls, Url: %ls\n", app, title, value);
+
+		if (value == NULL)
+			fprintf(fp, "%ls: Window: %ls, Title: %ls\n", timestamp(), app, title);
+		else
+			fprintf(fp, "%ls: Window: %ls, Title: %ls, Url: %ls\n", timestamp(), app, title, value);
+
 		fclose(fp);
 	}
 	catch (std::exception e) {
@@ -172,4 +192,64 @@ BOOL WriteWindowInfo(HWND hWndWindow, const wchar_t* app, wchar_t* value) {
 	delete[] msgBuff;
 
 	return FALSE;
+}
+
+void HandleIE(HWND hWnd) {
+	SHDocVw::IShellWindowsPtr spSHWinds;
+	IDispatchPtr spDisp;
+
+	//Find all explorer (Windows and Internet) and list them
+	if (spSHWinds.CreateInstance(__uuidof(SHDocVw::ShellWindows)) == S_OK) {
+		long nCount = spSHWinds->GetCount();
+		for (long i = 0; i < nCount; i++) {
+			_variant_t va(i, VT_I4);
+			spDisp = spSHWinds->Item(va);
+			SHDocVw::IWebBrowser2Ptr spBrowser(spDisp);
+			if (spBrowser != NULL) {
+				IWebBrowser2 *pBrowser = (IWebBrowser2 *)spBrowser.GetInterfacePtr();
+
+				BSTR bstrUrl = NULL, bstrTitle;
+				//Get the window title
+				pBrowser->get_LocationName(&bstrTitle);
+
+				//Detect if this is Windows Explorer (My Computer) or Internet Explorer (the internet)
+				IDispatchPtr spDisp;
+				if (pBrowser->get_Document(&spDisp) == S_OK && spDisp != NULL) {
+					MSHTML::IHTMLDocument2Ptr spHtmlDocument(spDisp);
+					if (spHtmlDocument != NULL) {
+						MSHTML::IHTMLElementPtr spHtmlElement;
+						spHtmlDocument->get_body(&spHtmlElement);
+						if (spHtmlElement != NULL) {
+							// Internet explorer.
+							pBrowser->get_LocationURL(&bstrUrl);
+
+							// Get window title.
+							wchar_t* title = new wchar_t[MAX_LOADSTRING];
+							GetWindowText(hWnd, title, MAX_LOADSTRING);
+
+							// Truncate the title to remove extra string.
+							std::wstring ws(title);
+							std::string titleStr(ws.begin(), ws.end());
+							size_t len = strlen(IE_TITLE_TRUNC);
+							titleStr.erase(strlen(titleStr.c_str()) - len, len);
+
+							if (wcscmp(getWChar(titleStr.c_str()), bstrTitle) == 0)
+								WriteWindowInfo(hWnd, L"Internet Explorer", bstrUrl);
+						}
+					}
+					spDisp.Release();
+				}
+
+				SysFreeString(bstrTitle);
+
+				if (bstrUrl != NULL)
+					SysFreeString(bstrUrl);
+
+				spBrowser.Release();
+			}
+		}
+	}
+	else {
+		OutputDebugString(L"Shell windows failed to initialise");
+	}
 }

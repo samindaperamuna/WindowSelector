@@ -16,9 +16,15 @@ extern "C" {
 
 #define MAX_URL_LEN 2000;
 #define LOG_FILE "data.log"
+
+	// Application identifiers.
 #define CHROME "Chrome_WidgetWin_1"
 #define IE "IEFrame"
 #define FIREFOX "MozillaWindowClass"
+#define ADOBE_READER "AVL_AVView"
+
+#define IE_NAME "Internet Explorer"
+#define IE_TITLE_TRUNC " - Internet Explorer"
 
 #define CHROME_ADDRESS_BAR "Address and search bar"
 #define FIREFOX_ADDRESS_BAR "Search with Google or enter address"
@@ -31,6 +37,8 @@ extern "C" {
 	DWORD WINAPI Thread(LPVOID pVoid);
 	BOOL CALLBACK EnumWindowsProc(HWND, LPARAM);
 	BOOL WriteWindowInfo(HWND, const wchar_t*, wchar_t*);
+	void HandleIE(HWND);
+	void Release();
 
 #ifdef __cplusplus
 }
