@@ -21,7 +21,7 @@ extern "C" {
 #define CHROME "Chrome_WidgetWin_1"
 #define IE "IEFrame"
 #define FIREFOX "MozillaWindowClass"
-#define ADOBE_READER "AVL_AVView"
+#define ADOBE_READER "AcrobatSDIWindow"
 
 #define IE_NAME "Internet Explorer"
 #define IE_TITLE_TRUNC " - Internet Explorer"
@@ -37,6 +37,7 @@ extern "C" {
 	DWORD WINAPI Thread(LPVOID pVoid);
 	BOOL CALLBACK EnumWindowsProc(HWND, LPARAM);
 	BOOL WriteWindowInfo(HWND, const wchar_t*, wchar_t*);
+	void handleChrome(HWND);
 	void HandleIE(HWND);
 	void Release();
 

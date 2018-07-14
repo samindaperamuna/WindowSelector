@@ -37,12 +37,13 @@ void CALLBACK WinEventProc(
 	DWORD dwEventThread,
 	DWORD dwmsEventTime) {
 	IAccessible* pAcc = NULL;
-	VARIANT varChild;
+	VARIANT varChild, varRole;
 	HRESULT hr = AccessibleObjectFromEvent(hWnd, idObject, idChild, &pAcc, &varChild);
 	if ((hr == S_OK) && pAcc != NULL) {
-		BSTR bstrName, bstrValue;
+		BSTR bstrName, bstrValue, bstrRole;
 		pAcc->get_accValue(varChild, &bstrValue);
 		pAcc->get_accName(varChild, &bstrName);
+		pAcc->get_accRole(varChild, &varRole);
 
 		wchar_t className[80];
 		GetClassName(hWnd, className, 80);
@@ -63,7 +64,7 @@ void CALLBACK WinEventProc(
 		else if (wcscmp(className, getWChar(IE)) == 0) {
 			HandleIE(hWnd);
 		}
-		else if (wcscmp(className, getWChar(ADOBE_READER)) == 0) {
+		else if (wcscmp(className, getWChar(ADOBE_READER)) == 0 && varRole.lVal == 10) {
 			WriteWindowInfo(hWnd, L"Adobe Reader", NULL);
 		}
 		pAcc->Release();
@@ -192,6 +193,34 @@ BOOL WriteWindowInfo(HWND hWndWindow, const wchar_t* app, wchar_t* value) {
 	delete[] msgBuff;
 
 	return FALSE;
+}
+
+void handleChrome(HWND hWnd) {
+	while (true) {
+		if (!IsWindowVisible(hWnd))
+			continue;
+		CComQIPtr<IUIAutomation> uia;
+
+		if (FAILED(uia.CoCreateInstance(CLSID_CUIAutomation)) || !uia)
+			break;
+
+		CComPtr<IUIAutomationElement> root;
+		if (FAILED(uia->ElementFromHandle(hWnd, &root)) || !root)
+			break;
+
+		CComPtr<IUIAutomationCondition> condition;
+		uia->CreatePropertyCondition(UIA_NamePropertyId, CComVariant(getWChar(CHROME_ADDRESS_BAR)), &condition);
+
+		// Maybe we don't have the right tab, continue ...
+		CComPtr<IUIAutomationElement> edit;
+		if (FAILED(root->FindFirst(TreeScope_Descendants, condition, &edit)) || !edit)
+			continue;
+
+		CComVariant url;
+		edit->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &url);
+		MessageBox(0, url.bstrVal, 0, 0);
+		break;
+	}
 }
 
 void HandleIE(HWND hWnd) {
